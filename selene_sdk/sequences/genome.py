@@ -9,6 +9,7 @@ import numpy as np
 import pkg_resources
 import pyfaidx
 import tabix
+import collections
 
 from .sequence import Sequence
 from .sequence import sequence_to_encoding
@@ -547,3 +548,106 @@ class Genome(Sequence):
 
         """
         return encoding_to_sequence(encoding, cls.BASES_ARR, cls.UNK_BASE)
+
+
+class GenomeLM(Genome):
+    """Same as Genome, but specialized for language models. Char and i
+    sentencepiece encoding. Super hacky and quick.
+
+    Parameters
+    ----------
+    input_path : str
+        Path to an indexed FASTA file.
+    blacklist_regions : str or None, optional
+    char_encoding : dict(str : int) or None, optional
+    Default is None (uses the default base dict of 
+    `{'A' : 0, 'C' : 1, 'G' : 2, 'T' : 3}`.  Specify a different character
+    based tokenization.
+    meta_information : list[str]
+    NotImplemented
+
+    Attributes
+    ----------
+    """
+    BASES_ARR = ['A', 'C', 'G', 'T', 'N']
+
+    BASE_TO_INDEX = collections.defaultdict(lambda: 4)
+    BASE_TO_INDEX.update({
+        'A': 0, 'C': 1, 'G': 2, 'T': 3, 'N': 4,
+        'a': 0, 'c': 1, 'g': 2, 't': 3, 'n': 4,
+    })
+
+    
+
+    COMPLEMENTARY_BASE_DICT = {
+        'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'N': 'N',
+        'a': 'T', 'c': 'G', 'g': 'C', 't': 'A', 'n': 'N'
+    }
+
+    INDEX_TO_BASE = {
+        0: 'A', 1: 'C', 2: 'G', 3: 'T', 4: 'N',
+    }
+
+    UNK_BASE = "N"
+
+    def __init__(self, input_path, blacklist_regions=None, char_encoding=None):
+        self.genome = pyfaidx.Fasta(input_path)
+        self.chrs = sorted(self.genome.keys())
+        self.len_chrs = self._get_len_chrs()
+        self._blacklist_tabix = None
+
+        if blacklist_regions == "hg19":
+            self._blacklist_tabix = tabix.open(
+                pkg_resources.resource_filename(
+                    "selene_sdk",
+                    "sequences/data/hg19_blacklist_ENCFF001TDO.bed.gz"))
+        elif blacklist_regions == "hg38":
+            self._blacklist_tabix = tabix.open(
+                pkg_resources.resource_filename(
+                    "selene_sdk",
+                    "sequences/data/hg38.blacklist.bed.gz"))
+        elif blacklist_regions is not None:  # user-specified file
+            self._blacklist_tabix = tabix.open(
+                blacklist_regions)
+
+        if char_encoding is not None:
+            bases = [str.upper(b) for b in char_encoding.keys()]
+            self.BASES_ARR = bases
+            lc_bases = [str.lower(b) for b in char_encoding.keys()]
+            self.BASE_TO_INDEX = {
+                **{b: ix for (ix, b) in enumerate(bases)},
+                **{b: ix for (ix, b) in enumerate(lc_bases)}}
+            self.INDEX_TO_BASE = {ix: b for (ix, b) in enumerate(bases)}
+            self.update_bases_order(bases)
+
+    @classmethod
+    def update_bases_order(cls, bases):
+        cls.BASES_ARR = bases
+        lc_bases = [str.lower(b) for b in bases]
+        cls.BASE_TO_INDEX = {
+            **{b: ix for (ix, b) in enumerate(bases)},
+            **{b: ix for (ix, b) in enumerate(lc_bases)}}
+        cls.INDEX_TO_BASE = {ix: b for (ix, b) in enumerate(bases)}
+
+    
+    def get_encoding_from_coords(self,
+                                 chrom,
+                                 start,
+                                 end,
+                                 strand='+',
+                                 pad=False):
+        sequence = self.get_sequence_from_coords(
+            chrom, start, end, strand=strand, pad=pad)
+        encoding = self.sequence_to_encoding(sequence)
+        return encoding
+
+    @classmethod
+    def sequence_to_encoding(cls, sequence):
+        """ Convert an input sequence to character encoding or tokenized sequence
+
+        Parameters
+        ----------
+        sequence : str
+            A nucleotide sequence of length :math:`L`
+        """
+        return np.array([cls.BASE_TO_INDEX[i] for i in sequence], dtype=np.int32)

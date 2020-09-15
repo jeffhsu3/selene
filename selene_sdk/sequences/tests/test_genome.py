@@ -1,8 +1,9 @@
 import unittest
 
+import pkg_resources
 import numpy as np
 
-from selene_sdk.sequences.genome import _get_sequence_from_coords
+from selene_sdk.sequences.genome import _get_sequence_from_coords, GenomeLM
 from selene_sdk.sequences.sequence import sequence_to_encoding, \
     encoding_to_sequence
 
@@ -104,6 +105,33 @@ class TestGenome(unittest.TestCase):
 
         self.assertEqual(observed1, "")
         self.assertEqual(observed2, "")
+
+
+class TestGenomeLM(unittest.TestCase):
+
+    def setUp(self):
+        self.genome = GenomeLM(pkg_resources.resource_filename(
+            "selene_sdk",
+            "sequences/tests/files/small.fasta"
+        ))
+
+        #:TODO test different char_encoding with unknown base
+
+
+    def test__genomelm_get_sequence_from_coords(self):
+        observed = self.genome.get_sequence_from_coords('chr1', 48, 54)
+        expected = "NNtaac"
+        self.assertEqual(observed, expected)
+
+    
+    def test__genomelm_sequence_to_encoding(self):
+        observed = self.genome.get_encoding_from_coords('chr1', 48, 54)
+        expected = np.array([4, 4, 3, 0, 0, 1])
+        self.assertSequenceEqual(observed.tolist(), expected.tolist())
+    
+    
+
+
 
 
 if __name__ == "__main__":
